@@ -1,0 +1,188 @@
+---
+title: "Identify Users"
+description: "Tie activity to signed-in customers after login or signup, record their ad consent, and never send plaintext personal data."
+---
+
+Until a visitor signs in, DAMA counts them as an anonymous user, identified by a visitor ID for their browser or device. Once you pass the customer's email address, it is hashed on the device, and DAMA uses that hash as the user's identity. The same customer then counts as one user across sessions and devices in RFM, cLTV, Retention Analysis and audiences. Audiences you send to Google Ads or Meta contain only identified users, matched by this email hash.
+
+## How identity works
+
+- **Identified user:** if an event carries `user_email_hash` (the SHA-256 hash of the normalized email address), that hash is the user's ID.
+- **Anonymous user:** otherwise the user ID comes from the visitor ID in `session_cookie_id` (the Web SDK sends its `dama_cookie_id` cookie). If there is none, DAMA derives an anonymous ID on the server from device and connection details. Your code never needs to create the user ID itself.
+- **No plaintext personal data:** plaintext email, phone and name fields are rejected. Only SHA-256 hashes are accepted: `user_email_hash`, `user_phone_hash`, `user_first_name_hash` and `user_last_name_hash`.
+- **Your own customer ID** (`user_id` / `customer_id`) can be passed to the Web SDK, which uses it only to set the customer type. It is not sent to DAMA and doesn't appear in reports. Identity always comes from the email hash.
+
+**Activity before sign-in.** Events sent before the customer signed in are first stored under the anonymous visitor ID. During its nightly processing, DAMA moves that browser's or device's anonymous activity from the previous 7 days onto the identified customer, as long as the visitor ID was used by only one signed-in customer in that time. Activity on a device shared by several signed-in customers stays anonymous.
+
+## Web
+
+Call `userDataPush` right after a successful login or signup, and on every page where the customer is signed in if you can:
+
+```javascript
+damaDP('userDataPush', {
+  user_email: 'customer@example.com', // hashed in the browser, never sent in plaintext
+  user_phone: '+90 555 123 45 67',    // hashed in the browser
+  user_first_name: 'Ayse',            // hashed in the browser
+  user_last_name: 'Yilmaz',           // hashed in the browser
+  user_country: 'TR',
+  user_language: 'tr',
+  user_customer_type: 'registered',
+  user_loyalty_tier: 'gold',
+  user_marketing_opt_in: true
+});
+```
+
+What the SDK does with these values:
+
+1. **Hashes personal data in the browser.** `user_email`, `user_phone`, `user_first_name` and `user_last_name` are normalized, hashed with SHA-256, and sent only as `user_email_hash`, `user_phone_hash`, `user_first_name_hash` and `user_last_name_hash`, together with `identity_hash_version: "v1"`. The plaintext values are removed before anything is stored or sent.
+2. **Saves the details in a first-party cookie** (`damadp_user_data`, 365 days), so later page loads are identified too. `userData` attaches the details to the current page only, but the hashes it creates are saved in the same cookie.
+3. **Attaches the details to every following event.**
+
+**Normalization before hashing**
+
+| Field | Normalization |
+|---|---|
+| Email | Leading and trailing spaces removed, then lowercased. |
+| Phone | Every character except digits removed. Include the country code (`+90 555 123 45 67` becomes `905551234567`). |
+| First and last name | Leading and trailing spaces removed, then lowercased. If you send only `user_name` (full name), the last word becomes the last name and the rest the first name. |
+
+**Accepted aliases.** If your platform uses `customer_*` names, the SDK maps them for you: `customer_email`, `customer_phone`, `customer_first_name` and `customer_last_name` are hashed like their `user_*` versions. `customer_locale` (for example `tr-TR`) sets `user_language`, and `user_country` too if you didn't send it. `customer_type`, `customer_marketing_opt_in`, `customer_orders_count`, `customer_total_spent` and `customer_created_at` map to `user_customer_type`, `user_marketing_opt_in`, `user_orders_count`, `user_total_spent` and `user_signup_date`. If you pass `user_id` or `customer_id` without a type, `user_customer_type` is set to `registered`.
+
+<Note>
+Hashing runs asynchronously. An event fired in the same instant as `userDataPush` may go out before the hash is ready. Later events, and every later page load, carry it. Hashing needs the browser's Web Crypto API, which is only available on HTTPS pages. On plain HTTP no hashes are created and the user stays anonymous.
+</Note>
+
+### Using the data layer (Google Tag Manager)
+
+When the SDK starts, it also checks `window.dataLayer` for user details. It takes the most recent entry that has `event: 'user_data_set'`, a `user_id` or a `customer_id`, and applies every `user_*` and `customer_*` key in that entry, the same way `userData` does:
+
+```javascript
+window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+  event: 'user_data_set',
+  user_id: 'C-10045',
+  user_email: 'customer@example.com',
+  user_country: 'TR'
+});
+```
+
+Push this before the DAMA tag fires, on every page where the customer is signed in. The SDK reads the data layer once, when it starts.
+
+### Logout
+
+The Web SDK has no logout command. To stop identifying the customer on that browser after logout, delete DAMA's user and visitor cookies as part of your logout, before the next page loads:
+
+```javascript
+document.cookie = 'damadp_user_data=; max-age=0; path=/';
+document.cookie = 'dama_cookie_id=; max-age=0; path=/';
+```
+
+The next page load is then anonymous, with a new visitor ID, so later anonymous browsing is not attached to the customer who logged out.
+
+## Apps and server-side code
+
+If you send events over HTTP (native iOS and Android apps, Flutter apps, your server), hash the email yourself and send it as `user_email_hash`. Never send the plaintext address.
+
+<CodeGroup>
+```javascript Node.js
+import { createHash } from 'node:crypto';
+
+const email = '  Customer@Example.com ';
+const userEmailHash = createHash('sha256')
+  .update(email.trim().toLowerCase())
+  .digest('hex');
+// e233d4a29013e9d87150c6237c6777bedf379ebf1acdc5d6126fec7e8bb74fb5
+```
+
+```python Python
+import hashlib
+
+email = "  Customer@Example.com "
+user_email_hash = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+# e233d4a29013e9d87150c6237c6777bedf379ebf1acdc5d6126fec7e8bb74fb5
+```
+
+```swift Swift
+import CryptoKit
+import Foundation
+
+let email = "  Customer@Example.com "
+let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+let userEmailHash = SHA256.hash(data: Data(normalized.utf8))
+    .map { String(format: "%02x", $0) }
+    .joined()
+```
+
+```kotlin Kotlin
+import java.security.MessageDigest
+
+val email = "  Customer@Example.com "
+val normalized = email.trim().lowercase()
+val userEmailHash = MessageDigest.getInstance("SHA-256")
+    .digest(normalized.toByteArray(Charsets.UTF_8))
+    .joinToString("") { "%02x".format(it) }
+```
+
+```dart Dart (Flutter)
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+
+const email = '  Customer@Example.com ';
+final userEmailHash =
+    sha256.convert(utf8.encode(email.trim().toLowerCase())).toString();
+```
+</CodeGroup>
+
+Then include it in each event, together with a stable device ID in `session_cookie_id` so the device's earlier anonymous activity can be attached to the customer:
+
+```json
+{
+  "event_name": "purchase",
+  "event_time": 1760947200000,
+  "session_cookie_id": "3f2b8c1e-5d4a-4f7b-9a63-2c1d0e8f7a51",
+  "user_email_hash": "e233d4a29013e9d87150c6237c6777bedf379ebf1acdc5d6126fec7e8bb74fb5",
+  "identity_hash_version": "v1"
+}
+```
+
+The hash must be exactly 64 hexadecimal characters, or the request fails with `422`. See the [field reference](/setup/send-events#field-reference) for the other user fields. On logout, stop sending the hash, and generate a new device ID if the device may be used by someone else.
+
+## Consent
+
+DAMA records the consent choices you send with each event. They don't switch tracking on or off: if a visitor hasn't agreed to tracking, don't load the SDK or send events for them, as your consent policy requires.
+
+DAMA uses the **ads** choice when you send an audience to **Google Ads**: only customers whose most recent recorded choice grants ads consent are uploaded. Customers who refused, and customers with no recorded choice, are left out. If nobody in the audience has granted ads consent, nothing is uploaded.
+
+Consent is recorded as three flags in this order: **essential**, **ads**, **analytics**. DAMA reads a customer's consent from their most recent **identified** event (one that carries `user_email_hash`) that includes consent, so send consent on the events of signed-in customers.
+
+### Web
+
+Add the `consents` parameter to the script URL with the visitor's current choices:
+
+```html
+<script src="https://collect.example.com/sdk/dama.js?id=YOUR_ORGANIZATION_ID&token=YOUR_TRACKING_TOKEN&collect=https://collect.example.com&consents=true,true,false"></script>
+```
+
+- Build the value from your consent banner on every page load. In Google Tag Manager, you can use variables in the tag, for example `consents=true,{{Ads Consent}},{{Analytics Consent}}`, where each variable returns `true` or `false`.
+- The SDK saves the value in the `dama_consents` cookie (365 days) and sends it with every event as `session_dcp`. On pages where the parameter is missing, the value from the cookie is used.
+- A changed choice is picked up the next time the script loads with the new value, usually on the next page load.
+
+### HTTP
+
+Send the flags as a string in `session_dcp` on each event:
+
+```json
+{
+  "event_name": "purchase",
+  "event_time": 1760947200000,
+  "user_email_hash": "e233d4a29013e9d87150c6237c6777bedf379ebf1acdc5d6126fec7e8bb74fb5",
+  "identity_hash_version": "v1",
+  "session_dcp": "[true,true,false]"
+}
+```
+
+The second value is the ads choice. You can also send the granted categories by name, as a string, for example `"[essential,ads]"`.
+
+## Verify
+
+Open your browser's developer tools on a page where you are signed in, find a request to `/tracking/` in the **Network** tab, and check that its payload contains `user_email_hash` (and `session_dcp`, if you send consent) and no `user_email`. See [Verify your installation](/setup/verify-installation).

@@ -1,0 +1,192 @@
+---
+title: "Flutter"
+description: "Track iOS and Android apps built with Flutter by sending events from Dart."
+---
+
+To track a Flutter app, send events from your Dart code to your collection URL over HTTP. This works the same on iOS and Android and needs no native code.
+
+<Note>
+DAMA also has a Flutter package, `dama_analytics`. It isn't published on pub.dev; ask your DAMA contact for access, and use it only in the version and configuration they confirm for your collection URL. The approach on this page works for every DAMA company.
+</Note>
+
+## Prerequisites
+
+- The iOS and Android apps of your company in DAMA, for the platforms your app runs on. Copy each one's **Organization ID** and **Tracking Token** from **Integration → SDK → iOS** and **Integration → SDK → Android** in the DAMA panel. If you don't see **Tracking Token** on these tabs, ask your DAMA contact for it.
+- Your collection URL, provided by DAMA during onboarding. The examples use `https://collect.example.com`.
+- The [`http`](https://pub.dev/packages/http), [`crypto`](https://pub.dev/packages/crypto), [`uuid`](https://pub.dev/packages/uuid) and [`shared_preferences`](https://pub.dev/packages/shared_preferences) packages:
+
+  ```bash
+  flutter pub add http crypto uuid shared_preferences
+  ```
+
+## Add a DAMA client
+
+The class below handles what DAMA's reports need: a stable device ID, sessions (a new session after 30 minutes without events, starting with a `session_start` event), the hashed email of a signed-in customer, and consent.
+
+```dart dama_client.dart
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
+
+class DamaClient {
+  DamaClient({
+    required this.collectUrl,
+    required this.organizationId,
+    required this.trackingToken,
+  });
+
+  final String collectUrl; // your collection URL, e.g. https://collect.example.com
+  final String organizationId;
+  final String trackingToken;
+
+  static const _sessionTimeoutMs = 30 * 60 * 1000;
+  static const _uuid = Uuid();
+
+  String? _deviceId;
+  int? _sessionStart;
+  int? _lastEventTime;
+  String? _emailHash;
+  String? _consent;
+
+  /// Call once at app start.
+  Future<void> init() async {
+    final prefs = await SharedPreferences.getInstance();
+    _deviceId = prefs.getString('dama_device_id') ?? _uuid.v4();
+    await prefs.setString('dama_device_id', _deviceId!);
+  }
+
+  /// Call after login or signup.
+  void identify(String email) {
+    _emailHash = sha256.convert(utf8.encode(email.trim().toLowerCase())).toString();
+  }
+
+  /// Call on logout.
+  Future<void> reset() async {
+    _emailHash = null;
+    _sessionStart = null;
+    _deviceId = _uuid.v4();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('dama_device_id', _deviceId!);
+  }
+
+  /// Record the user's consent choices (essential, ads, analytics).
+  void setConsent({required bool ads, required bool analytics}) {
+    _consent = '[true,$ads,$analytics]';
+  }
+
+  /// Send an event. `fields` are extra fields from the field reference.
+  Future<void> track(String eventName, [Map<String, dynamic> fields = const {}]) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final isNewSession =
+        _sessionStart == null || now - (_lastEventTime ?? 0) > _sessionTimeoutMs;
+    _lastEventTime = now;
+    if (isNewSession) {
+      _sessionStart = now;
+      await _send('session_start', now, const {});
+    }
+    await _send(eventName, now, fields);
+  }
+
+  Future<void> _send(String eventName, int time, Map<String, dynamic> fields) async {
+    final body = <String, dynamic>{
+      'event_name': eventName,
+      'event_time': time,
+      'event_id': _uuid.v4(),
+      'session_id': _sessionStart.toString(),
+      'session_start_time': _sessionStart,
+      'session_cookie_id': _deviceId,
+      'session_is_mobile': true,
+      if (_emailHash != null) 'user_email_hash': _emailHash,
+      if (_emailHash != null) 'identity_hash_version': 'v1',
+      if (_consent != null) 'session_dcp': _consent,
+      ...fields,
+    };
+    final response = await http.post(
+      Uri.parse('$collectUrl/tracking/$organizationId'),
+      headers: {'Authorization': trackingToken, 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 202) {
+      throw Exception('DAMA rejected $eventName: ${response.statusCode} ${response.body}');
+    }
+  }
+}
+```
+
+## Use it
+
+<Steps>
+  <Step title="Initialize">
+    Create one client when the app starts, with the credentials of the platform it is running on:
+
+    ```dart main.dart
+    import 'dart:io' show Platform;
+
+    import 'package:flutter/material.dart';
+
+    import 'dama_client.dart';
+
+    late final DamaClient dama;
+
+    Future<void> main() async {
+      WidgetsFlutterBinding.ensureInitialized();
+      dama = DamaClient(
+        collectUrl: 'https://collect.example.com',
+        organizationId: Platform.isIOS ? 'YOUR_IOS_ORGANIZATION_ID' : 'YOUR_ANDROID_ORGANIZATION_ID',
+        trackingToken: Platform.isIOS ? 'YOUR_IOS_TRACKING_TOKEN' : 'YOUR_ANDROID_TRACKING_TOKEN',
+      );
+      await dama.init();
+      runApp(const MyApp());
+    }
+    ```
+  </Step>
+  <Step title="Track screens">
+    Send `page_view` for the screens you want in the Dashboard and Funnel Analysis:
+
+    ```dart
+    dama.track('page_view', {
+      'event_page_path': '/products/running-shoe',
+      'event_page_title': 'Running Shoe',
+    });
+    ```
+  </Step>
+  <Step title="Send ecommerce and custom events">
+    Use the [standard events](/setup/send-events#standard-events) and the field names from the [field reference](/setup/send-events#field-reference):
+
+    ```dart
+    dama.track('purchase', {
+      'event_id': 'order-100234-purchase',
+      'event_cart_value': 2999.8,
+      'event_currency': 'TRY',
+      'event_transaction_id': '100234',
+      'event_items': [
+        {'item_id': 'SKU-123', 'item_name': 'Running Shoe', 'price': 1499.9, 'quantity': 2},
+      ],
+    });
+
+    dama.track('newsletter_signup', {
+      'tracking_data': {'event_data': {'form_location': 'footer'}},
+    });
+    ```
+  </Step>
+  <Step title="Identify users and record consent">
+    After login, call `dama.identify(email)`. On logout, call `dama.reset()`. When the user makes a consent choice, call `dama.setConsent(ads: ..., analytics: ...)`. See [Identify users](/setup/identify-users) and [Consent](/setup/identify-users#consent).
+  </Step>
+</Steps>
+
+## Delivery and retries
+
+The example sends each event as soon as it is tracked and throws if DAMA doesn't accept it. In production:
+
+- Catch errors so tracking never breaks your app.
+- On a network error, `429` or `503`, retry later with the **same body**. Because the body keeps the same `event_id`, DAMA stores the event only once.
+- Don't retry `401`, `413` or `422`; fix the request instead. See [Responses](/setup/send-events#responses).
+- Never send plaintext email, phone or name fields. The request is rejected.
+
+## Next steps
+
+- [Send events](/setup/send-events): the standard events your reports need.
+- [Verify your installation](/setup/verify-installation).

@@ -1,47 +1,60 @@
 ---
 title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+description: "Install DAMA on your website and see your first events in the panel."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This quickstart installs the Web SDK on a website. For apps, start with the [Setup overview](/setup/overview).
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Get your credentials">
+    If you don't have a DAMA account or company yet, [create an account](/user-guide/account#create-an-account) and [add a company](/user-guide/companies#add-a-company) first.
 
-    ```bash
-    npm install your-package
-    ```
+    Sign in to the DAMA panel, open your company and go to **Integration → SDK → Web**. Copy the **Organization ID** and the **Tracking Token**. If you don't see **Tracking Token** on this tab, ask your DAMA contact for it.
+
+    You also need your collection URL, which DAMA provides during onboarding. The examples use `https://collect.example.com`.
+
+    <Frame>
+      <img src="/images/screenshots/integration-sdk-web.png" alt="Integration → SDK → Web with Organization ID and Tracking Token" />
+    </Frame>
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Add the script tag">
+    Put the SDK in the `<head>` of every page, replacing the collection URL (twice), the Organization ID and the token:
 
-    ```bash
-    your-cli init
+    ```html
+    <script src="https://collect.example.com/sdk/dama.js?id=YOUR_ORGANIZATION_ID&token=YOUR_TRACKING_TOKEN&collect=https://collect.example.com"></script>
     ```
+
+    The SDK starts a session and sends a `page_view` on every page load. Full options are in [Web](/setup/web).
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+  <Step title="Send ecommerce events">
+    Send the standard events your reports rely on, especially `purchase` with its value and currency. Code that runs while the page is still loading must wait for `DOMContentLoaded`:
 
-    ```bash
-    your-cli start
+    ```javascript
+    document.addEventListener('DOMContentLoaded', function () {
+      damaDP('purchase', {
+        transaction_id: 'ORDER-1001',
+        event_transaction_id: 'ORDER-1001',
+        value: 2499.9,
+        currency: 'TRY'
+      });
+    });
     ```
+
+    See [Send events](/setup/send-events) for every standard event and which report uses it, and add the [session start snippet](/setup/send-events#session-start) if you use Retention Analysis.
+  </Step>
+  <Step title="Identify signed-in users">
+    After login or signup, identify the user so their activity is linked across sessions and devices, and record their ad consent if you plan to send audiences to Google Ads. See [Identify users](/setup/identify-users).
+  </Step>
+  <Step title="Verify">
+    Check the requests in your browser and the **Dashboard** in the panel. See [Verify your installation](/setup/verify-installation).
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Next steps
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Connect BigQuery" icon="database" href="/integrations/bigquery" />
+  <Card title="Set up ServerMob" icon="server" href="/servermob/overview" />
+  <Card title="Build audiences" icon="users" href="/user-guide/audiences" />
+  <Card title="Read your funnel" icon="filter" href="/user-guide/funnel" />
+</CardGroup>

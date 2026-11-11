@@ -1,0 +1,175 @@
+---
+title: "Sending Events"
+description: "How to send events to the DAMA Tracking API from your server or app: identity, hashing, retries, consent and examples."
+---
+
+This guide covers what you need when you call `POST /tracking/{organization_id}` yourself, typically from your backend. If you use the DAMA Web SDK, it builds these requests for you.
+
+For which event names to send and every field you can send, see [Send events](/setup/send-events#standard-events) and the [field reference](/setup/send-events#field-reference). The interactive reference is at [Track an event](/api-reference/track-event).
+
+## Prerequisites
+
+- Your **collection URL**, provided by DAMA during onboarding.
+- Your **Organization ID** and **Tracking Token** from **Integration → SDK** in the DAMA panel. If you don't see **Tracking Token** on this tab, ask your DAMA contact for it. See [Authentication](/api-reference/introduction#authentication).
+
+## Build the request
+
+- One event per request, as a JSON object of up to 32,768 bytes.
+- `event_name` and `event_time` are required. Send `event_time` as a Unix timestamp in **milliseconds**.
+- Only the fields in the [field reference](/setup/send-events#field-reference) are accepted. Any other top-level field (for example `user_id`, `user_email` or `session_ip`) makes the whole request fail with `ERR_VALIDATION`. Put your own parameters in `custom` or `tracking_data`.
+- Send a unique `event_id` with every event so retries are never stored twice.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://collect.example.com/tracking/YOUR_ORGANIZATION_ID" \
+  -H "Authorization: YOUR_TRACKING_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_id": "order-100234-purchase",
+    "event_name": "purchase",
+    "event_time": 1760947200000,
+    "event_transaction_id": "100234",
+    "event_cart_value": 2999.8,
+    "event_currency": "TRY",
+    "event_items": [
+      { "item_id": "SKU-123", "item_name": "Running Shoe", "price": 1499.9, "quantity": 2 }
+    ],
+    "user_email_hash": "e233d4a29013e9d87150c6237c6777bedf379ebf1acdc5d6126fec7e8bb74fb5",
+    "identity_hash_version": "v1"
+  }'
+```
+
+```javascript Node.js
+import { createHash } from "node:crypto";
+
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+const response = await fetch(
+  `https://collect.example.com/tracking/${process.env.DAMA_ORGANIZATION_ID}`,
+  {
+    method: "POST",
+    headers: {
+      Authorization: process.env.DAMA_TRACKING_TOKEN,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      event_id: "order-100234-purchase",
+      event_name: "purchase",
+      event_time: Date.now(),
+      event_transaction_id: "100234",
+      event_cart_value: 2999.8,
+      event_currency: "TRY",
+      event_items: [
+        { item_id: "SKU-123", item_name: "Running Shoe", price: 1499.9, quantity: 2 },
+      ],
+      user_email_hash: sha256(" Jane.Doe@Example.com ".trim().toLowerCase()),
+      identity_hash_version: "v1",
+    }),
+  }
+);
+
+if (response.status !== 202) {
+  const result = await response.json();
+  console.error("DAMA rejected the event:", response.status, result.error);
+}
+```
+
+```python Python
+import hashlib
+import os
+import time
+
+import requests
+
+def sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+response = requests.post(
+    f"https://collect.example.com/tracking/{os.environ['DAMA_ORGANIZATION_ID']}",
+    headers={"Authorization": os.environ["DAMA_TRACKING_TOKEN"]},
+    json={
+        "event_id": "order-100234-purchase",
+        "event_name": "purchase",
+        "event_time": int(time.time() * 1000),
+        "event_transaction_id": "100234",
+        "event_cart_value": 2999.8,
+        "event_currency": "TRY",
+        "event_items": [
+            {"item_id": "SKU-123", "item_name": "Running Shoe", "price": 1499.9, "quantity": 2},
+        ],
+        "user_email_hash": sha256(" Jane.Doe@Example.com ".strip().lower()),
+        "identity_hash_version": "v1",
+    },
+    timeout=10,
+)
+
+if response.status_code != 202:
+    print("DAMA rejected the event:", response.status_code, response.json().get("error"))
+```
+</CodeGroup>
+
+<Warning>
+Keep your Tracking Token in server-side configuration (for example an environment variable). Don't commit it to source control.
+</Warning>
+
+## Identify users
+
+DAMA decides which user an event belongs to in this order:
+
+1. **`user_email_hash`**: when present, it is the user's identity. The same person is recognized across devices and sessions.
+2. **`session_cookie_id`**: a first-party browser or device ID of 8–64 letters, digits, `_` or `-`. The Web SDK sends one automatically.
+3. **Otherwise**, an anonymous identifier derived from the IP address of the request together with `session_device`, `session_user_agent` (or the `User-Agent` header), `session_screen_resolution` and `session_is_mobile`.
+
+<Tip>
+When you send events from your server, the request's IP address is your server's, and the end user's IP can't be sent as a field. Send `user_email_hash` whenever you know the customer, or a stable `session_cookie_id` for anonymous visitors, so events from different people are not grouped together.
+</Tip>
+
+### Hash personal data
+
+DAMA accepts personal data only as SHA-256 hashes. Normalize each value the same way the DAMA Web SDK does, then hash it and send the lowercase hex digest. Set `identity_hash_version` to `v1`.
+
+| Field | Normalize before hashing |
+|---|---|
+| `user_email_hash` | Trim spaces, lowercase |
+| `user_phone_hash` | Remove every character that is not a digit |
+| `user_first_name_hash` | Trim spaces, lowercase |
+| `user_last_name_hash` | Trim spaces, lowercase |
+
+Plain-text fields such as `user_email`, `user_phone` or `user_name` are rejected, and email addresses or phone numbers that appear in names, URLs, UTM values or parameters are replaced with `[redacted]` before the event is stored. See [Identify users](/setup/identify-users) for how identity works across the SDK and your server.
+
+## Retries and duplicates
+
+- If DAMA receives the same `event_id` again for the same organization, it keeps only the first copy. Build it from something stable, such as your order ID and the event name (`order-100234-purchase`).
+- Without an `event_id`, two events with the same user, `event_time`, `event_name` and `custom` values are also stored once.
+- Retry `429` and `503` responses and network errors with increasing delays. Don't retry other `4xx` responses without fixing the request. See [Error codes](/api-reference/introduction#error-codes).
+
+## Consent
+
+Send the user's consent state in `session_dcp` as a **string**, in one of two forms:
+
+- Positional booleans in `[essential, ads, analytics]` order: `"[true,false,true]"`
+- Granted category names: `"[essential,analytics]"`
+
+When you send an audience to Google Ads, DAMA includes only users whose most recent recorded `ads` consent is granted. Users with no recorded consent are left out.
+
+## Verify
+
+1. Send a test event and check that the response is HTTP `202` with `{"success": true}`.
+2. Follow [Verify your installation](/setup/verify-installation) to confirm the events reach your reports.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="I get ERR_AUTH_FAILED">
+    The Tracking Token doesn't belong to the Organization ID in the URL. Copy both again from the same platform tab on **Integration → SDK**, and send the token without a `Bearer` prefix.
+  </Accordion>
+  <Accordion title="I get ERR_VALIDATION">
+    Common causes: a field that isn't in the [field reference](/setup/send-events#field-reference) (such as `user_id`, `user_email` or `session_ip`), a plain-text email or name, a hash that isn't 64 hex characters, a currency that isn't a three-letter code (`TL` instead of `TRY`), a missing `event_name`, or an `event_time` before 2020 or more than a day in the future.
+  </Accordion>
+  <Accordion title="I get ERR_PAYLOAD_TOO_LARGE">
+    The body is over 32,768 bytes. Send fewer `event_items`, or shorten long parameter values.
+  </Accordion>
+  <Accordion title="All my server-side events show up as one user">
+    Without `user_email_hash` or `session_cookie_id`, DAMA groups events by the request's IP address and device fields, which are your server's. Send one of these fields with every event.
+  </Accordion>
+</AccordionGroup>

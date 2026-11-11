@@ -1,0 +1,90 @@
+---
+title: "Android"
+description: "Options for sending events to DAMA from a native Android app."
+---
+
+<Info>
+DAMA does not offer a native Android SDK yet. You track an Android app by sending events from your own Kotlin code over HTTP, or from Dart if the app is built with Flutter.
+</Info>
+
+## Prerequisites
+
+- The Android app of your company in DAMA. Its **Organization ID** is under **Integration → SDK → Android** in the DAMA panel, where you can also save the app's **App ID** and package name (shown as **Bundle Name**).
+- Your **Tracking Token**, shown next to the **Organization ID** on the same tab. If you don't see **Tracking Token** there, ask your DAMA contact for it.
+- Your collection URL, provided by DAMA during onboarding. The examples use `https://collect.example.com`.
+
+## Option 1: Flutter apps
+
+If your Android app is built with Flutter, track it from your Dart code. The [Flutter](/setup/flutter) page shows how to send events from Dart with your Android app's credentials.
+
+## Option 2: Send events over HTTP
+
+Post each event as JSON to `https://collect.example.com/tracking/YOUR_ORGANIZATION_ID` (your collection URL, then `/tracking/` and your Organization ID) with your tracking token in the `Authorization` header. A successful request returns `202`. The [field reference](/setup/send-events#field-reference) lists every accepted field. Only `event_name` and `event_time` are required.
+
+The example below uses OkHttp and `org.json`. Run it off the main thread.
+
+```kotlin
+import java.security.MessageDigest
+import java.util.UUID
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+
+class DamaClient(
+    private val endpoint: String = "https://collect.example.com/tracking/YOUR_ORGANIZATION_ID",
+    private val token: String = "YOUR_TRACKING_TOKEN",
+    private val http: OkHttpClient = OkHttpClient()
+) {
+    fun send(event: JSONObject): Boolean {
+        val request = Request.Builder()
+            .url(endpoint)
+            .header("Authorization", token)
+            .post(event.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(request).execute().use { return it.code == 202 }
+    }
+}
+
+fun sha256Hex(value: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+// A stable device ID, created once and stored (context is your Application or Activity)
+val prefs = context.getSharedPreferences("dama", android.content.Context.MODE_PRIVATE)
+val deviceId = prefs.getString("dama_device_id", null)
+    ?: UUID.randomUUID().toString().also { prefs.edit().putString("dama_device_id", it).apply() }
+
+// Example: purchase by a signed-in user
+val email = "customer@example.com".trim().lowercase()
+DamaClient().send(JSONObject().apply {
+    put("event_name", "purchase")
+    put("event_time", System.currentTimeMillis())
+    put("event_id", UUID.randomUUID().toString()) // reuse the same value when retrying
+    put("event_cart_value", 2999.8)
+    put("event_currency", "TRY")
+    put("event_transaction_id", "100234")
+    put("session_id", "YOUR_SESSION_ID")
+    put("session_start_time", 1760947000000L)
+    put("session_cookie_id", deviceId)
+    put("session_is_mobile", true)
+    put("user_email_hash", sha256Hex(email))
+    put("identity_hash_version", "v1")
+})
+```
+
+When you send events yourself, you are responsible for the things an SDK would normally do:
+
+- **Device ID:** create a random ID (a UUID works) on first launch, store it, and send it as `session_cookie_id` on every event. DAMA groups the device's anonymous activity by it and attaches that activity to the customer after they sign in.
+- **Sessions:** create a session ID and start time, send them as `session_id` and `session_start_time` on every event, and send a `session_start` event when a new session begins (Retention Analysis needs it). We recommend the rule the Web SDK uses: start a new session after 30 minutes without events.
+- **Screens:** send `page_view` (with `event_page_path` and `event_page_title`) for the screens you want in the Dashboard and Funnel Analysis.
+- **Identity:** after login, send the SHA-256 hash of the normalized email as `user_email_hash`. Never send plaintext email, phone or name. On logout, stop sending the hash. See [Identify users](/setup/identify-users).
+- **Consent:** send the user's consent choices as a string in `session_dcp`, for example `"[true,true,false]"` (essential, ads, analytics). Google Ads audience uploads need a granted ads choice. See [Consent](/setup/identify-users#consent).
+- **Retries:** on a network error, `429` or `503`, retry with the same body. Because it keeps the same `event_id`, the event is stored only once. Don't retry `401`, `413` or `422`. See [Responses](/setup/send-events#responses).
+
+## Next steps
+
+- [Send events](/setup/send-events): the standard events your reports need.
+- [Verify your installation](/setup/verify-installation).

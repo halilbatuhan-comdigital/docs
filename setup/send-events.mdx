@@ -1,0 +1,441 @@
+---
+title: "Send Events"
+description: "Standard events that power DAMA's reports, custom events, and the full event field reference."
+---
+
+An event is one thing a user did: viewed a page, added a product to the cart, completed a purchase. DAMA's reports look for specific **standard event names** and fields, so send those names exactly as written below. You can send any number of **custom events** on top of them.
+
+## Prerequisites
+
+- The [Web SDK](/setup/web) is installed, or you can send HTTP requests from your own code (see [Send events over HTTP](#send-events-over-http)). Mobile apps send over HTTP: see [iOS](/setup/ios), [Android](/setup/android) or [Flutter](/setup/flutter).
+
+## Standard events
+
+Event names are case-sensitive. Use them exactly as shown.
+
+| Event | Send it when | Used by |
+|---|---|---|
+| `session_start` | A new session begins | **Retention Analysis**: a user's cohort is the period of their first `session_start`. |
+| `page_view` | A page (or app screen) is viewed | **Dashboard** top pages; first step of the default **Funnel Analysis**. |
+| `view_item_list` | A list of products is shown (category, search results) | Default **Funnel Analysis** step. |
+| `view_item` | A product detail page is viewed | **Dashboard** top products; default **Funnel Analysis** step. |
+| `add_to_cart` | A product is added to the cart | Default **Funnel Analysis** step; **Retention Analysis** engagement scoring. |
+| `view_cart` | The cart is viewed | Default **Funnel Analysis** step; **Retention Analysis** engagement scoring. |
+| `begin_checkout` | Checkout starts | Default **Funnel Analysis** step; **Retention Analysis** engagement scoring. |
+| `purchase` | An order is completed | **RFM**, **cLTV**, **Dashboard** revenue, last step of the default **Funnel Analysis**, **Retention Analysis** engagement scoring. |
+
+The default funnel runs `page_view` → `view_item_list` → `view_item` → `add_to_cart` → `view_cart` → `begin_checkout` → `purchase`.
+
+### Session start
+
+Retention Analysis builds its cohorts only from `session_start` events, so send one at the beginning of every session.
+
+- **Web:** the Web SDK sends `page_view` automatically but **not** `session_start`. Add the snippet below.
+- **Apps and HTTP:** send `session_start` yourself whenever you start a new session. The [iOS](/setup/ios), [Android](/setup/android) and [Flutter](/setup/flutter) examples show how.
+
+The Web SDK keeps the current session in the `damadp_session_id` cookie, which expires after 30 minutes without activity. If that cookie is missing when the page starts loading, the SDK is about to start a new session. Check for it **before** the DAMA script tag, then send `session_start` right after it:
+
+```html
+<script>
+  // Before the DAMA tag: no session cookie means this page load starts a new session.
+  window.damaIsNewSession = !/(?:^|;\s*)damadp_session_id=/.test(document.cookie);
+</script>
+<script src="https://collect.example.com/sdk/dama.js?id=YOUR_ORGANIZATION_ID&token=YOUR_TRACKING_TOKEN&collect=https://collect.example.com"></script>
+<script>
+  // After the DAMA tag, once the page's HTML has been parsed (see "When to call damaDP" on the Web page).
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.damaIsNewSession) {
+      damaDP('event', 'session_start');
+    }
+  });
+</script>
+```
+
+The SDK queues the call and sends it as soon as it has started.
+
+In Google Tag Manager, the first part must run before the DAMA tag and the last part after it. Use tag sequencing: put the cookie check in a Custom HTML tag set to fire **before** the DAMA tag, and `damaDP('event', 'session_start')` (inside the same `if`, without the `DOMContentLoaded` wrapper) in a Custom HTML tag set to fire **after** the DAMA tag.
+
+The SDK also starts a new session without a page load when a tab comes back after more than 30 minutes in the background. The snippet covers sessions that start with a page load.
+
+### Purchase: value and currency
+
+Revenue figures in DAMA come from two fields of `purchase`:
+
+- **Value**: the total order amount, as a number of zero or more. With the Web SDK, pass it as `value`. Over HTTP, send it as `event_cart_value`.
+- **Currency**: a three-letter ISO 4217 code such as `TRY`, `USD`, `EUR` or `GBP`. With the Web SDK, pass it as `currency`. Over HTTP, send it as `event_currency`.
+
+Dashboard revenue converts each purchase into your reporting currency using that day's exchange rate. DAMA converts **TRY, USD, EUR and GBP**. RFM and cLTV add up purchase values as they are sent, without converting them, so send all purchases of one app in the same currency.
+
+<Warning>
+A currency that isn't exactly three characters (for example `TL` or `₺`) makes the whole event fail validation, and it is not stored. Always send the ISO code.
+</Warning>
+
+### Examples
+
+<CodeGroup>
+```javascript Web
+// Product list (category page, search results)
+damaDP('view_item_list', {
+  item_list_name: 'Running Shoes',
+  items: [
+    { item_id: 'SKU-123', item_name: 'Running Shoe', price: 1499.9 },
+    { item_id: 'SKU-456', item_name: 'Trail Shoe', price: 1899.9 }
+  ]
+});
+
+// Product detail page
+damaDP('view_item', {
+  value: 1499.9,
+  currency: 'TRY',
+  items: [{ item_id: 'SKU-123', item_name: 'Running Shoe', item_brand: 'Acme', item_category: 'Shoes', price: 1499.9 }]
+});
+
+// Add to cart
+damaDP('add_to_cart', {
+  value: 1499.9,
+  currency: 'TRY',
+  items: [{ item_id: 'SKU-123', item_name: 'Running Shoe', price: 1499.9, quantity: 1 }]
+});
+
+// Cart page
+damaDP('view_cart', {
+  value: 2999.8,
+  currency: 'TRY',
+  items: [{ item_id: 'SKU-123', item_name: 'Running Shoe', price: 1499.9, quantity: 2 }]
+});
+
+// Checkout started
+damaDP('begin_checkout', {
+  value: 2999.8,
+  currency: 'TRY',
+  items: [{ item_id: 'SKU-123', item_name: 'Running Shoe', price: 1499.9, quantity: 2 }]
+});
+
+// Order completed
+damaDP('purchase', {
+  transaction_id: '100234',
+  event_transaction_id: '100234',
+  value: 2999.8,
+  currency: 'TRY',
+  items: [{ item_id: 'SKU-123', item_name: 'Running Shoe', price: 1499.9, quantity: 2 }]
+});
+```
+
+```json HTTP (purchase)
+{
+  "event_name": "purchase",
+  "event_time": 1760947200000,
+  "event_id": "order-100234-purchase",
+  "event_cart_value": 2999.8,
+  "event_currency": "TRY",
+  "event_transaction_id": "100234",
+  "event_items": [
+    { "item_id": "SKU-123", "item_name": "Running Shoe", "price": 1499.9, "quantity": 2 }
+  ],
+  "session_id": "1760947000",
+  "session_start_time": 1760947000000,
+  "session_cookie_id": "3f2b8c1e-5d4a-4f7b-9a63-2c1d0e8f7a51"
+}
+```
+</CodeGroup>
+
+<Note>
+**How the Web SDK maps your parameters:** `value` becomes the event value (`event_cart_value`), `currency` becomes the event currency (`event_currency`), and `items` becomes the event's item list (`event_items`). Parameters whose names match an event field, such as `event_transaction_id` or `event_category`, fill that field. Every other parameter (for example `transaction_id` or `item_list_name`) is stored as a custom event parameter.
+</Note>
+
+## Custom events
+
+Any name that isn't a standard event is a custom event. Use lowercase words joined by underscores, such as `newsletter_signup` or `video_complete`. Custom events count toward the Dashboard **Events** chart.
+
+<CodeGroup>
+```javascript Web
+damaDP('event', 'newsletter_signup', {
+  form_location: 'footer',
+  plan: 'weekly'
+});
+
+// Shorthand: an unrecognized command is sent as a custom event.
+// Use the 'event' form above if the call can run before the SDK has started.
+damaDP('newsletter_signup', { form_location: 'footer' });
+```
+
+```json HTTP
+{
+  "event_name": "newsletter_signup",
+  "event_time": 1760947200000,
+  "tracking_data": {
+    "event_data": { "form_location": "footer", "plan": "weekly" }
+  }
+}
+```
+</CodeGroup>
+
+**Rules for custom parameters**
+
+- At most 40 parameters per event. Parameter names may contain only letters, digits, `_` and `-`, up to 128 characters.
+- Values can be strings (up to 1,024 characters), numbers, booleans or null, a flat object of such values, or a list of up to 100 such values or flat objects.
+- Never send plaintext personal data. Parameter keys such as `user_email`, `user_phone`, `user_name`, `user_first_name` and `user_last_name` make the event fail validation. Text that looks like an email address or an international phone number is replaced with `[redacted]` in event names, page and referrer fields, UTM fields, items and parameters.
+
+If an event breaks one of these rules, the whole event is rejected and not stored.
+
+## Send events over HTTP
+
+If no SDK fits your platform, or you want to send events from your server, post each event as JSON to your collection URL. Send one event per request.
+
+```bash
+curl -X POST "https://collect.example.com/tracking/YOUR_ORGANIZATION_ID" \
+  -H "Authorization: YOUR_TRACKING_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_name": "purchase",
+    "event_time": 1760947200000,
+    "event_id": "order-100234-purchase",
+    "event_cart_value": 2999.8,
+    "event_currency": "TRY",
+    "event_transaction_id": "100234",
+    "event_items": [
+      { "item_id": "SKU-123", "item_name": "Running Shoe", "price": 1499.9, "quantity": 2 }
+    ],
+    "session_id": "1760947000",
+    "session_start_time": 1760947000000,
+    "user_email_hash": "e233d4a29013e9d87150c6237c6777bedf379ebf1acdc5d6126fec7e8bb74fb5",
+    "identity_hash_version": "v1"
+  }'
+```
+
+Replace `https://collect.example.com` with your collection URL (provided by DAMA during onboarding). The **Organization ID** and **Tracking Token** are on **Integration → SDK** in the DAMA panel. A successful request returns HTTP `202` with `{"success": true}`. The endpoint is also described in the [API reference](/api-reference/track-event).
+
+For sessions and the Dashboard to work, send `session_id` and `session_start_time` on every event. To keep a device's anonymous activity together, send a stable device ID as `session_cookie_id` (see [Identify users](/setup/identify-users)).
+
+### Field reference
+
+Every field except `event_name` and `event_time` is optional. Any field not listed here, for example `user_id`, `user_email` or `session_ip`, is rejected, and the whole request fails with `422`. Text fields accept up to 1,024 characters unless a lower limit is listed.
+
+<ParamField path="organization_id" type="string" required>
+  Your Organization ID, in the URL path (8–64 characters: hexadecimal digits and `-`). If you also send `organization_id` in the body, it must match.
+</ParamField>
+
+<ParamField header="Authorization" type="string" required>
+  Your tracking token, as the raw header value (no `Bearer` prefix).
+</ParamField>
+
+#### Event
+
+<ParamField body="event_name" type="string" required>
+  Event name, 1–128 characters. Use a [standard event](#standard-events) name where one applies.
+</ParamField>
+<ParamField body="event_time" type="integer" required>
+  When the event happened, as a Unix timestamp in milliseconds. Values below 100,000,000,000 are treated as seconds and converted. It must be no earlier than 1 January 2020 and no more than 24 hours in the future.
+</ParamField>
+<ParamField body="event_id" type="string">
+  Your unique ID for this event, up to 64 characters. If it is 8–64 characters of letters, digits, `_` and `-`, DAMA stores the event only once per ID (case-insensitive), so retries are safe. Without a usable `event_id`, DAMA treats events with the same user, `event_time`, `event_name` and `custom` values as duplicates.
+</ParamField>
+<ParamField body="event_cart_value" type="number">
+  Event value (order total for `purchase`), zero or more. `event_value` is accepted as an alias.
+</ParamField>
+<ParamField body="event_currency" type="string">
+  Three-letter ISO 4217 currency code, for example `TRY`. Stored in upper case.
+</ParamField>
+<ParamField body="event_transaction_id" type="string">
+  Order or transaction ID, up to 128 characters.
+</ParamField>
+<ParamField body="event_qty" type="integer">
+  Quantity, zero or more.
+</ParamField>
+<ParamField body="event_category" type="string">
+  Free-form event category, up to 128 characters.
+</ParamField>
+<ParamField body="event_page_url" type="string">
+  Full URL of the page.
+</ParamField>
+<ParamField body="event_page_path" type="string">
+  Page path, for example `/products/running-shoe`. The Dashboard's top pages and top products are grouped by this field.
+</ParamField>
+<ParamField body="event_page_title" type="string">
+  Page or screen title.
+</ParamField>
+<ParamField body="event_referrer" type="string">
+  Referring URL.
+</ParamField>
+<ParamField body="event_source" type="string">
+  Traffic source for this event, up to 256 characters.
+</ParamField>
+<ParamField body="event_medium" type="string">
+  Traffic medium for this event, up to 256 characters.
+</ParamField>
+<ParamField body="event_campaign" type="string">
+  Campaign for this event, up to 256 characters.
+</ParamField>
+<ParamField body="event_items" type="object[]">
+  Products in the event, at most 100. Each item is a flat object with at most 20 keys (letters, digits, `_` and `-`). Values can be strings (up to 512 characters), numbers, booleans or null. Common keys: `item_id`, `item_name`, `item_brand`, `item_category`, `item_variant`, `price`, `quantity`. Items sent with `page_view` are not stored.
+</ParamField>
+<ParamField body="tracking_data" type="object">
+  Your own event parameters, nested at most three levels deep, with at most 40 keys per object and 100 entries per list. Follows the [custom parameter rules](#custom-events). The Web SDK puts custom parameters in `tracking_data.event_data`.
+</ParamField>
+<ParamField body="custom" type="object">
+  Flat key/value parameters (strings, numbers, booleans or null), at most 40 keys.
+</ParamField>
+
+#### User
+
+<ParamField body="user_email_hash" type="string">
+  SHA-256 hash (64 hexadecimal characters) of the user's email address, trimmed and lowercased before hashing. When present, this is the user's identity in DAMA, and it is what DAMA sends to Google Ads and Meta when you send an audience. See [Identify users](/setup/identify-users).
+</ParamField>
+<ParamField body="user_phone_hash" type="string">
+  SHA-256 hash of the phone number, including the country code, with every non-digit character removed.
+</ParamField>
+<ParamField body="user_first_name_hash" type="string">
+  SHA-256 hash of the first name, trimmed and lowercased.
+</ParamField>
+<ParamField body="user_last_name_hash" type="string">
+  SHA-256 hash of the last name, trimmed and lowercased.
+</ParamField>
+<ParamField body="identity_hash_version" type="string">
+  Version of the normalization used for the hashes, up to 16 characters. The Web SDK sends `v1`.
+</ParamField>
+<ParamField body="user_country" type="string">
+  Country code, up to 8 characters.
+</ParamField>
+<ParamField body="user_language" type="string">
+  Language code, up to 16 characters.
+</ParamField>
+<ParamField body="user_timezone" type="string">
+  IANA timezone, for example `Europe/Istanbul`, up to 64 characters.
+</ParamField>
+<ParamField body="user_signup_date" type="string">
+  Signup date, up to 64 characters.
+</ParamField>
+<ParamField body="user_marketing_opt_in" type="boolean">
+  Whether the user agreed to marketing communication.
+</ParamField>
+<ParamField body="user_customer_type" type="string">
+  Customer type, for example `registered`, up to 64 characters.
+</ParamField>
+<ParamField body="user_loyalty_tier" type="string">
+  Loyalty tier, up to 64 characters.
+</ParamField>
+<ParamField body="user_gender_id" type="string">
+  Gender identifier, up to 32 characters.
+</ParamField>
+<ParamField body="user_age_id" type="string">
+  Age group identifier, up to 32 characters.
+</ParamField>
+<ParamField body="user_orders_count" type="integer">
+  Number of orders the user has placed, zero or more.
+</ParamField>
+<ParamField body="user_total_spent" type="number">
+  Total amount the user has spent, zero or more.
+</ParamField>
+
+#### Session
+
+<ParamField body="session_id" type="string">
+  Session identifier, up to 128 characters. Numbers are accepted and stored as text. Dashboard sessions and Funnel Analysis count sessions by this field.
+</ParamField>
+<ParamField body="session_start_time" type="integer">
+  Session start, as a Unix timestamp in milliseconds. Dashboard sessions and Funnel Analysis use it to place the session on a day.
+</ParamField>
+<ParamField body="session_end_time" type="integer">
+  Session end, as a Unix timestamp in milliseconds.
+</ParamField>
+<ParamField body="session_duration_sec" type="number">
+  Session duration in seconds.
+</ParamField>
+<ParamField body="session_cookie_id" type="string">
+  Stable browser or device identifier: 8–64 letters, digits, `_` or `-` (a UUID works). Anonymous activity is grouped by it, and it lets DAMA attach a visitor's earlier anonymous activity to them after they identify. The Web SDK sends its `dama_cookie_id` cookie here.
+</ParamField>
+<ParamField body="session_dcp" type="string">
+  Consent flags, up to 512 characters, for example `[true,true,false]` in the order essential, ads, analytics. See [Consent](/setup/identify-users#consent).
+</ParamField>
+<ParamField body="session_device" type="string">
+  Device name or type, up to 128 characters.
+</ParamField>
+<ParamField body="session_screen_resolution" type="string">
+  Screen resolution, for example `1920x1080`, up to 32 characters.
+</ParamField>
+<ParamField body="session_is_mobile" type="boolean">
+  Whether the device is mobile.
+</ParamField>
+<ParamField body="session_browser" type="string">
+  Browser name, up to 64 characters.
+</ParamField>
+<ParamField body="session_os_version" type="string">
+  Operating system and version, up to 64 characters.
+</ParamField>
+<ParamField body="session_language" type="string">
+  Device or browser language, up to 16 characters.
+</ParamField>
+<ParamField body="session_user_agent" type="string">
+  User agent string, up to 512 characters. Used only to tell anonymous devices apart when no `session_cookie_id` is sent. If you leave it out, the request's `User-Agent` header is used for that.
+</ParamField>
+<ParamField body="session_page" type="string">
+  Landing page.
+</ParamField>
+<ParamField body="session_referrer" type="string">
+  Session referrer.
+</ParamField>
+<ParamField body="session_channel" type="string">
+  Acquisition channel, for example `google` or `direct`, up to 64 characters.
+</ParamField>
+<ParamField body="session_utm_source" type="string">
+  `utm_source` of the landing URL, up to 256 characters.
+</ParamField>
+<ParamField body="session_utm_medium" type="string">
+  `utm_medium` of the landing URL, up to 256 characters.
+</ParamField>
+<ParamField body="session_utm_campaign" type="string">
+  `utm_campaign` of the landing URL, up to 256 characters.
+</ParamField>
+<ParamField body="session_utm_content" type="string">
+  `utm_content` of the landing URL, up to 256 characters.
+</ParamField>
+<ParamField body="session_utm_term" type="string">
+  `utm_term` of the landing URL, up to 256 characters.
+</ParamField>
+<ParamField body="session_gclid" type="string">
+  Google Ads click ID (`gclid`), up to 256 characters.
+</ParamField>
+<ParamField body="session_gbraid" type="string">
+  Google Ads `gbraid` click ID, up to 256 characters.
+</ParamField>
+<ParamField body="session_wbraid" type="string">
+  Google Ads `wbraid` click ID, up to 256 characters.
+</ParamField>
+<ParamField body="session_ga_client_id" type="string">
+  Google Analytics client ID, up to 64 characters.
+</ParamField>
+<ParamField body="session_fbclid" type="string">
+  Meta click ID (`fbclid`), up to 512 characters.
+</ParamField>
+<ParamField body="session_fbc" type="string">
+  Meta `_fbc` cookie value, up to 512 characters.
+</ParamField>
+<ParamField body="session_fbp" type="string">
+  Meta `_fbp` cookie value, up to 128 characters.
+</ParamField>
+<ParamField body="session_ttclid" type="string">
+  TikTok click ID (`ttclid`), up to 512 characters.
+</ParamField>
+<ParamField body="session_ttp" type="string">
+  TikTok `_ttp` cookie value, up to 128 characters.
+</ParamField>
+<ParamField body="session_msclkid" type="string">
+  Microsoft Ads click ID (`msclkid`), up to 256 characters.
+</ParamField>
+
+### Responses
+
+Every response is JSON. On error the body is `{"success": false, "error": "<code>"}`; it does not say which field failed.
+
+| Status | Body `error` | Meaning |
+|---|---|---|
+| `202` | (none, `success: true`) | Accepted. |
+| `401` | `ERR_AUTH_REQUIRED` | The `Authorization` header is missing. |
+| `401` | `ERR_AUTH_FAILED` | The token is invalid or doesn't belong to the Organization ID in the URL. |
+| `413` | `ERR_PAYLOAD_TOO_LARGE` | The body is larger than 32 KB (32,768 bytes). |
+| `422` | `ERR_VALIDATION` | The Organization ID in the URL is malformed, or a field is invalid or not allowed. Nothing from the request is stored. |
+| `422` | `ERR_ORGANIZATION_MISMATCH` | The `organization_id` in the body doesn't match the URL. |
+| `429` | `ERR_RATE_LIMITED` | DAMA is limiting requests for this organization. Retry later. |
+| `503` | `ERR_BUFFER_FULL` / `ERR_BUFFER_UNAVAILABLE` | Temporarily unavailable. Retry with backoff, and reuse the same `event_id` so retries never create duplicates. |
+
+Don't retry `401`, `413` or `422` without fixing the request first.

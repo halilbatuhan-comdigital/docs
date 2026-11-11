@@ -1,0 +1,511 @@
+openapi: 3.1.0
+info:
+  title: DAMA Tracking API
+  version: "1.0.0"
+  summary: Send events to DAMA from your website, app or server.
+  description: |
+    The DAMA Tracking API accepts events for one organization (a website or app in the DAMA panel)
+    and makes them available in your DAMA reports and audiences. The DAMA web SDK uses the same
+    endpoint.
+
+    - **Host:** your collection URL, provided by DAMA during onboarding.
+    - **Authentication:** your organization's **Tracking Token** from **Integration → SDK** in the
+      DAMA panel, sent as the raw `Authorization` header value (no `Bearer` prefix).
+    - **Format:** one JSON event per request, up to 32,768 bytes.
+    - **Personal data:** accepted only as SHA-256 hashes (`*_hash` fields). Plain-text email
+      addresses, phone numbers and names are rejected.
+
+    Responses are `{ "success": true }` with HTTP `202` when the event is accepted, and
+    `{ "success": false, "error": "ERR_..." }` with a matching HTTP status when it is not.
+servers:
+  - url: https://{host}
+    description: Your collection URL (provided by DAMA during onboarding)
+    variables:
+      host:
+        default: collect.example.com
+        description: Host name of your collection URL.
+tags:
+  - name: Tracking
+    description: Send events to DAMA.
+security:
+  - TrackingToken: []
+paths:
+  /tracking/{organization_id}:
+    post:
+      tags: [Tracking]
+      operationId: trackEvent
+      summary: Track an event
+      description: |
+        Accepts one event for the organization in the path.
+
+        - Only `event_name` and `event_time` are required.
+        - Fields that are not listed below are rejected with `ERR_VALIDATION`. Text fields are
+          limited to 1,024 characters unless a lower limit is listed.
+        - Email addresses and phone numbers found in the event name, page and referrer fields,
+          UTM fields, `custom`, `event_items` and `tracking_data` are replaced with `[redacted]`
+          before the event is stored.
+        - Retries are safe. With an `event_id` (8–64 characters of letters, digits, `_` or `-`),
+          DAMA stores the event only once per `event_id`. Without one, events with the same user,
+          `event_time`, `event_name` and `custom` values are stored once.
+        - The endpoint accepts cross-origin requests, so it can be called from a browser.
+      parameters:
+        - name: organization_id
+          in: path
+          required: true
+          description: Your Organization ID, as shown on **Integration → SDK** in the DAMA panel.
+          schema:
+            type: string
+            pattern: "^[0-9A-Fa-f-]{8,64}$"
+          example: 3F2A9C1E-7B4D-4E8A-9F01-2C3D4E5F6A7B
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Event"
+            examples:
+              page_view:
+                summary: Page view
+                value:
+                  event_id: 7c1e9a42-page-0001
+                  event_name: page_view
+                  event_time: 1760947200000
+                  event_page_url: https://www.example.com/products/blue-shirt
+                  event_page_path: /products/blue-shirt
+                  event_page_title: Blue Shirt
+                  session_id: "1760947000000"
+                  session_start_time: 1760947000000
+                  session_device: desktop
+                  session_screen_resolution: 1920x1080
+                  session_is_mobile: false
+                  session_utm_source: newsletter
+              purchase_server_side:
+                summary: Purchase sent from your server
+                value:
+                  event_id: order-100234-purchase
+                  event_name: purchase
+                  event_time: 1760947200000
+                  event_transaction_id: "100234"
+                  event_cart_value: 2999.8
+                  event_currency: TRY
+                  event_items:
+                    - item_id: SKU-123
+                      item_name: Running Shoe
+                      price: 1499.9
+                      quantity: 2
+                  user_email_hash: e233d4a29013e9d87150c6237c6777bedf379ebf1acdc5d6126fec7e8bb74fb5
+                  identity_hash_version: v1
+                  custom:
+                    coupon_code: AUTUMN10
+      responses:
+        "202":
+          description: The event was accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+              example:
+                success: true
+        "401":
+          description: |
+            `ERR_AUTH_REQUIRED`: the `Authorization` header is missing.
+            `ERR_AUTH_FAILED`: the token is not valid, or it was issued for a different
+            Organization ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                required:
+                  summary: Missing token
+                  value: { success: false, error: ERR_AUTH_REQUIRED }
+                failed:
+                  summary: Invalid token
+                  value: { success: false, error: ERR_AUTH_FAILED }
+        "413":
+          description: "`ERR_PAYLOAD_TOO_LARGE`: the request body is larger than 32,768 bytes."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { success: false, error: ERR_PAYLOAD_TOO_LARGE }
+        "422":
+          description: |
+            `ERR_VALIDATION`: the Organization ID or the body is invalid, for example a missing
+            `event_name`, a field that is not in this reference, a plain-text personal data field,
+            a hash that is not 64 hexadecimal characters, a currency that is not three letters, or
+            an `event_time` out of range. Nothing from the request is stored.
+            `ERR_ORGANIZATION_MISMATCH`: `organization_id` in the body differs from the path.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                validation:
+                  summary: Invalid event
+                  value: { success: false, error: ERR_VALIDATION }
+                mismatch:
+                  summary: Organization ID mismatch
+                  value: { success: false, error: ERR_ORGANIZATION_MISMATCH }
+        "429":
+          description: "`ERR_RATE_LIMITED`: too many requests for this organization. Retry later."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { success: false, error: ERR_RATE_LIMITED }
+        "503":
+          description: |
+            `ERR_BUFFER_FULL` or `ERR_BUFFER_UNAVAILABLE`: DAMA cannot accept events right now and
+            the event was not stored. Retry with backoff, using the same `event_id`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                full:
+                  summary: Temporarily full
+                  value: { success: false, error: ERR_BUFFER_FULL }
+                unavailable:
+                  summary: Temporarily unavailable
+                  value: { success: false, error: ERR_BUFFER_UNAVAILABLE }
+components:
+  securitySchemes:
+    TrackingToken:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        Your organization's **Tracking Token**, copied from **Integration → SDK** in the DAMA
+        panel, sent as the raw header value (no `Bearer` prefix). Each token is valid for one
+        Organization ID only.
+  schemas:
+    Success:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+    Error:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: string
+          description: Error code.
+          enum:
+            - ERR_AUTH_REQUIRED
+            - ERR_AUTH_FAILED
+            - ERR_PAYLOAD_TOO_LARGE
+            - ERR_VALIDATION
+            - ERR_ORGANIZATION_MISMATCH
+            - ERR_RATE_LIMITED
+            - ERR_BUFFER_FULL
+            - ERR_BUFFER_UNAVAILABLE
+    Sha256Hex:
+      type: string
+      description: |
+        SHA-256 digest as 64 hexadecimal characters. Uppercase is accepted and stored in
+        lowercase.
+      pattern: "^[0-9a-fA-F]{64}$"
+    Event:
+      type: object
+      additionalProperties: false
+      required: [event_name, event_time]
+      properties:
+        organization_id:
+          type: string
+          maxLength: 64
+          description: Optional. If you send it, it must equal the Organization ID in the path.
+        event_id:
+          type: string
+          maxLength: 64
+          description: |
+            Your unique ID for this event. When it is 8–64 characters of letters, digits, `_` or
+            `-`, DAMA stores the event only once per `event_id` (compared case-insensitively), so
+            retries never create duplicates.
+          example: order-100234-purchase
+        event_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Event name, for example `page_view` or `purchase`. Case-sensitive.
+          example: purchase
+        event_time:
+          type: integer
+          description: |
+            When the event happened, as a Unix timestamp in milliseconds. Values in seconds are
+            converted automatically. Must be no earlier than 1 January 2020 (UTC) and no more than
+            24 hours in the future.
+          example: 1760947200000
+        event_cart_value:
+          type: number
+          minimum: 0
+          description: Event value (the order total for `purchase`). `event_value` is accepted as an alias.
+        event_currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: Three-letter ISO 4217 currency code. Stored in uppercase.
+          example: TRY
+        event_transaction_id:
+          type: string
+          maxLength: 128
+          description: Order or transaction ID.
+        event_qty:
+          type: integer
+          minimum: 0
+          description: Quantity.
+        event_category:
+          type: string
+          maxLength: 128
+          description: Event category.
+        event_page_url:
+          type: string
+          description: Full URL of the page.
+        event_page_path:
+          type: string
+          description: Page path, for example `/products/running-shoe`.
+        event_page_title:
+          type: string
+          description: Page or screen title.
+        event_referrer:
+          type: string
+          description: Referring URL.
+        event_source:
+          type: string
+          maxLength: 256
+          description: Traffic source of this event.
+        event_medium:
+          type: string
+          maxLength: 256
+          description: Traffic medium of this event.
+        event_campaign:
+          type: string
+          maxLength: 256
+          description: Campaign of this event.
+        event_items:
+          type: array
+          maxItems: 100
+          description: |
+            Products in the event. Each item is a flat object with at most 20 keys; keys are 1–128
+            characters of letters, digits, `_` or `-`; values are strings (up to 512 characters),
+            numbers, booleans or null. Common keys: `item_id`, `item_name`, `item_brand`,
+            `item_category`, `item_variant`, `price`, `quantity`. Items sent with `page_view` are
+            not stored.
+          items:
+            type: object
+            maxProperties: 20
+            additionalProperties:
+              type: [string, number, boolean, "null"]
+        custom:
+          type: object
+          maxProperties: 40
+          description: |
+            Flat custom parameters, at most 40 keys. Keys are 1–128 characters of letters, digits,
+            `_` or `-`; values are strings, numbers, booleans or null.
+          additionalProperties:
+            type: [string, number, boolean, "null"]
+        tracking_data:
+          type: object
+          description: |
+            Your own event parameters, nested up to three levels. At most 40 keys per object and
+            100 entries per list; keys are 1–128 characters of letters, digits, `_` or `-`; text
+            values up to 1,024 characters. Keys such as `user_email`, `user_phone`, `user_name`,
+            `user_first_name` and `user_last_name` are rejected. If the top-level `*_hash` fields
+            are absent, valid hashes in `tracking_data.user_data` are used instead.
+          additionalProperties: true
+        user_email_hash:
+          $ref: "#/components/schemas/Sha256Hex"
+          description: |
+            SHA-256 of the user's email address, trimmed and lowercased before hashing. When
+            present, it is the user's identity in DAMA and lets their events be matched across
+            devices.
+        user_phone_hash:
+          $ref: "#/components/schemas/Sha256Hex"
+          description: SHA-256 of the user's phone number with every non-digit character removed.
+        user_first_name_hash:
+          $ref: "#/components/schemas/Sha256Hex"
+          description: SHA-256 of the user's first name, trimmed and lowercased.
+        user_last_name_hash:
+          $ref: "#/components/schemas/Sha256Hex"
+          description: SHA-256 of the user's last name, trimmed and lowercased.
+        identity_hash_version:
+          type: string
+          maxLength: 16
+          description: Version of the normalization used for the hashes. The DAMA web SDK sends `v1`.
+          example: v1
+        user_country:
+          type: string
+          maxLength: 8
+          description: Country code.
+        user_language:
+          type: string
+          maxLength: 16
+          description: Language code.
+        user_timezone:
+          type: string
+          maxLength: 64
+          description: IANA time zone, for example `Europe/Istanbul`.
+        user_signup_date:
+          type: string
+          maxLength: 64
+          description: Signup date.
+        user_marketing_opt_in:
+          type: boolean
+          description: Whether the user agreed to marketing communication.
+        user_customer_type:
+          type: string
+          maxLength: 64
+          description: Customer type, for example `registered`.
+        user_loyalty_tier:
+          type: string
+          maxLength: 64
+          description: Loyalty tier.
+        user_gender_id:
+          type: string
+          maxLength: 32
+          description: Gender identifier.
+        user_age_id:
+          type: string
+          maxLength: 32
+          description: Age group identifier.
+        user_orders_count:
+          type: integer
+          minimum: 0
+          description: Number of orders the user has placed.
+        user_total_spent:
+          type: number
+          minimum: 0
+          description: Total amount the user has spent.
+        session_id:
+          type: [string, integer]
+          maxLength: 128
+          description: Session identifier. Numbers are accepted and stored as text.
+        session_start_time:
+          type: integer
+          exclusiveMinimum: 0
+          description: Session start, as a Unix timestamp in milliseconds.
+        session_end_time:
+          type: integer
+          exclusiveMinimum: 0
+          description: Session end, as a Unix timestamp in milliseconds.
+        session_duration_sec:
+          type: number
+          minimum: 0
+          description: Session duration in seconds.
+        session_cookie_id:
+          type: string
+          maxLength: 64
+          description: |
+            First-party browser or device identifier. When it is 8–64 characters of letters,
+            digits, `_` or `-` and no `user_email_hash` is sent, it identifies the visitor.
+        session_device:
+          type: string
+          maxLength: 128
+          description: Device name or type.
+        session_screen_resolution:
+          type: string
+          maxLength: 32
+          description: Screen resolution, for example `1920x1080`.
+        session_is_mobile:
+          type: boolean
+          description: Whether the device is mobile.
+        session_user_agent:
+          type: string
+          maxLength: 512
+          description: User agent string. If absent, the request's `User-Agent` header is used.
+        session_browser:
+          type: string
+          maxLength: 64
+          description: Browser name.
+        session_os_version:
+          type: string
+          maxLength: 64
+          description: Operating system and version.
+        session_language:
+          type: string
+          maxLength: 16
+          description: Device or browser language.
+        session_page:
+          type: string
+          description: Landing page.
+        session_referrer:
+          type: string
+          description: Session referrer.
+        session_channel:
+          type: string
+          maxLength: 64
+          description: Acquisition channel, for example `google` or `direct`.
+        session_utm_source:
+          type: string
+          maxLength: 256
+          description: "`utm_source` of the landing URL."
+        session_utm_medium:
+          type: string
+          maxLength: 256
+          description: "`utm_medium` of the landing URL."
+        session_utm_campaign:
+          type: string
+          maxLength: 256
+          description: "`utm_campaign` of the landing URL."
+        session_utm_content:
+          type: string
+          maxLength: 256
+          description: "`utm_content` of the landing URL."
+        session_utm_term:
+          type: string
+          maxLength: 256
+          description: "`utm_term` of the landing URL."
+        session_gclid:
+          type: string
+          maxLength: 256
+          description: Google Ads click ID (`gclid`).
+        session_gbraid:
+          type: string
+          maxLength: 256
+          description: Google Ads app click ID (`gbraid`).
+        session_wbraid:
+          type: string
+          maxLength: 256
+          description: Google Ads web click ID (`wbraid`).
+        session_ga_client_id:
+          type: string
+          maxLength: 64
+          description: Google Analytics client ID.
+        session_fbclid:
+          type: string
+          maxLength: 512
+          description: Meta click ID (`fbclid`).
+        session_fbc:
+          type: string
+          maxLength: 512
+          description: Meta click cookie value (`_fbc`).
+        session_fbp:
+          type: string
+          maxLength: 128
+          description: Meta browser cookie value (`_fbp`).
+        session_ttclid:
+          type: string
+          maxLength: 512
+          description: TikTok click ID (`ttclid`).
+        session_ttp:
+          type: string
+          maxLength: 128
+          description: TikTok browser cookie value (`_ttp`).
+        session_msclkid:
+          type: string
+          maxLength: 256
+          description: Microsoft Advertising click ID (`msclkid`).
+        session_dcp:
+          type: string
+          maxLength: 512
+          description: |
+            Consent state as a string: positional booleans in `[essential, ads, analytics]` order,
+            for example `"[true,false,true]"`, or the granted category names, for example
+            `"[essential,analytics]"`.
+          example: "[true,false,true]"

@@ -1,0 +1,8 @@
+/* The Mintlify AI assistant is turned off for now: hide its entry points and panel. */
+button[aria-label="Toggle assistant panel"],
+button[aria-label="Ask Assistant"],
+[data-assistant-sheet-container],
+[data-assistant-bar],
+#chat-assistant-sheet {
+  display: none !important;
+}

@@ -1,0 +1,140 @@
+---
+title: "Troubleshooting"
+description: "Fix common ServerMob issues with access, DNS, saving settings, GTM loading and server-side events."
+---
+
+## Access
+
+<AccordionGroup>
+  <Accordion title="ServerMOB is greyed out in the DAMA panel sidebar">
+    ServerMob isn't enabled for the company selected in the DAMA panel. Check that you selected the right company. If you did, ask your DAMA contact to activate ServerMob for it.
+  </Accordion>
+  <Accordion title="The portal shows &quot;Access denied&quot;">
+    The message **Your account does not have access to Servermob. Please sign in with a different account or contact your administrator.** means ServerMob access hasn't been granted to your user. Access is granted per user: ask your DAMA contact to enable ServerMob for your account. Click **Return to login** to sign in with another account.
+  </Accordion>
+  <Accordion title="The portal shows a sign-in page">
+    Sign in with your DAMA email address and password. **Incorrect username or password.** means the email address or password doesn't match your DAMA account.
+  </Accordion>
+  <Accordion title="My company isn't listed in the portal">
+    The portal's sidebar only lists companies that have ServerMob enabled and that your user belongs to. Ask an owner of your company to add your user to the company in the DAMA panel, or ask your DAMA contact to enable ServerMob for it.
+  </Accordion>
+  <Accordion title="The portal shows &quot;Could not load configuration.&quot;">
+    The portal couldn't load the settings of the selected company. Reload the page. If the message keeps appearing, ask your DAMA contact for help.
+  </Accordion>
+</AccordionGroup>
+
+## Domain and DNS
+
+<AccordionGroup>
+  <Accordion title="&quot;Server and domain details haven't been assigned yet&quot;">
+    DAMA hasn't set up the **Web Address** and **Server IP** for your company yet, so **Save Changes** is disabled. Ask your DAMA contact to assign them. See [Domain setup](/servermob/domain-setup).
+  </Accordion>
+  <Accordion title="DNS Control shows &quot;DNS verification failed.&quot;">
+    The check found no A record for your subdomain.
+
+    - Confirm the A record exists at your DNS provider, with the right host name (for example `tag` for `tag.example.com`) and your **Server IP** as its value.
+    - Wait for propagation. New or changed records can take from a few minutes to several hours to become visible, depending on the TTL.
+    - Check from your computer, for example with `nslookup tag.example.com`.
+    - If the record exists and the check keeps failing, wait a few minutes and try again; DNS servers sometimes respond slowly. If it still fails, ask your DAMA contact for help.
+  </Accordion>
+  <Accordion title="DNS Control passes, but tags still don't load">
+    **DNS Control** passes as soon as the subdomain has an A record, even one that points to the wrong server. Check that the record's target is your **Server IP** (see [What DNS Control checks](/servermob/domain-setup#what-dns-control-checks)). Then confirm that `https://tag.example.com/healthz` returns `ok`.
+  </Accordion>
+  <Accordion title="HTTPS errors or certificate warnings on the subdomain">
+    If DNS resolves but `https://tag.example.com/healthz` fails or shows a certificate warning, the subdomain isn't ready to serve secure traffic yet. Your ServerMob server doesn't issue a certificate for your subdomain by itself. Send your subdomain name to your DAMA contact to set up HTTPS.
+  </Accordion>
+  <Accordion title="Requests return 403 Forbidden when testing with curl or a script">
+    ServerMob rejects requests with an empty user agent and requests from known bots and crawlers. When testing from the command line, send a normal browser user agent:
+
+    ```bash Terminal
+    curl -A "Mozilla/5.0" "https://tag.example.com/healthz"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Saving settings
+
+<AccordionGroup>
+  <Accordion title="&quot;Please fix the highlighted fields.&quot;">
+    One or more fields are missing or invalid. The error under each field tells you what to fix:
+
+    | Message | Fix |
+    |---|---|
+    | **This field is required.** | Fill in the field. All **Email Notifications (SMTP)** fields and at least one **GTM-ID** are always required; **Meta Pixel ID** and **Meta Access Token** are required while **Meta Conversion API Enabled** is on. |
+    | **GTM IDs must look like GTM-XXXXXXX.** | Remove the invalid container ID and add it again with letters and digits only. |
+    | **Meta Pixel ID must contain only digits.** | Enter the numeric Pixel ID from Meta Events Manager. |
+    | **Enter a valid port number (1-65535).** | Enter your mail server port, for example `587`. |
+    | **Enter a valid email address.** | Check **Sender Email Address**. |
+    | **Enter valid email addresses separated by commas.** | Check **Recipient Email List** for typos and separate addresses with commas. |
+  </Accordion>
+  <Accordion title="&quot;Could not save settings. Please try again.&quot;">
+    The settings couldn't be saved or couldn't be applied to your ServerMob server. Wait a moment and click **Save Changes** again. If the message keeps appearing, don't keep saving; reach out to your DAMA contact and mention the company and the time you saved.
+  </Accordion>
+  <Accordion title="&quot;No active ServerMOB group found.&quot;">
+    The portal has no company selected, usually because none of your companies has ServerMob enabled. Select a company in the portal's sidebar, or ask your DAMA contact to enable ServerMob.
+  </Accordion>
+</AccordionGroup>
+
+## GTM
+
+<AccordionGroup>
+  <Accordion title="gtm.js returns 400 &quot;invalid id&quot;">
+    The `id` parameter is missing or isn't a valid container ID. `/gtm.js` only accepts IDs in the format `GTM-` followed by uppercase letters and digits (for example `GTM-AB12CD3`). Check the snippet on your site for typos, lowercase letters or extra spaces. For `gtag.js`, the ID must start with `G-` or `GT-`.
+  </Accordion>
+  <Accordion title="gtm.js returns 502 &quot;bad gateway&quot;">
+    ServerMob couldn't get your container from Google. The most common causes are:
+
+    - The container ID is wrong, or the container has never been published. Publish a version in GTM and check the ID.
+    - A temporary problem reaching Google. Reload after a minute.
+  </Accordion>
+  <Accordion title="My latest GTM changes don't appear on the site">
+    ServerMob caches your container for a few minutes. Wait a few minutes after publishing and reload the page with the cache disabled in your browser's developer tools.
+  </Accordion>
+  <Accordion title="GTM Preview doesn't connect to my site">
+    Use the **Debug Mode** version of the snippet from **Code Preview**. It passes GTM's preview parameters to ServerMob, which hands preview requests to Google. See [GTM Preview mode](/servermob/gtm-setup#gtm-preview-mode).
+  </Accordion>
+  <Accordion title="In GTM Preview mode, gtm.js loads from googletagmanager.com">
+    This is expected. ServerMob sends Preview requests to Google so that Preview and Tag Assistant work normally. Outside Preview mode, the container loads from your subdomain.
+  </Accordion>
+  <Accordion title="Some requests still go to vendor domains">
+    ServerMob only rewrites URLs in scripts it serves. Tags hard-coded in your site's HTML, or loaded by a script that doesn't come through your subdomain, still contact their vendor directly. Move those tags into your GTM container.
+  </Accordion>
+  <Accordion title="Events are counted twice">
+    Check that the old GTM snippet (loading from `www.googletagmanager.com`) has been removed. Running both snippets loads the container twice.
+  </Accordion>
+</AccordionGroup>
+
+## Meta Conversions API
+
+<AccordionGroup>
+  <Accordion title="No server events appear in Meta Events Manager">
+    - Check that the **Meta Pixel ID** and **Meta Access Token** are saved and that **Meta Conversion API Enabled** is on.
+    - Check that the Pixel is deployed as a tag inside your GTM container and that its requests go to `/meta/tr/` on your subdomain (in your browser's **Network** tab). Hard-coded Pixels bypass ServerMob.
+    - Check that the access token was generated for the same Pixel ID.
+    - Check **CAPI DISPATCHED** in **Data Preview**. If it stays at `–` while Pixel requests reach your subdomain, Meta isn't accepting the events. Check that the access token is still valid for this Pixel, or generate a new one and save it.
+  </Accordion>
+  <Accordion title="Events are counted twice in Meta">
+    Meta can only deduplicate browser and server events that share an event ID. Set an event ID on your Pixel events. See [Deduplication](/servermob/meta-capi#deduplication).
+  </Accordion>
+  <Accordion title="Events from another Pixel show up in my Pixel">
+    ServerMob sends every Pixel event it sees to the single Pixel ID configured in the portal. If your container runs several Meta Pixels, their events are all sent server-side to that Pixel.
+  </Accordion>
+</AccordionGroup>
+
+## TikTok Events API
+
+<AccordionGroup>
+  <Accordion title="No server events appear in TikTok Events Manager">
+    - Check that the **TikTok Pixel Code** and **TikTok Access Token** are saved and that **TikTok Pixel Enabled** is on.
+    - Check that the TikTok Pixel is deployed through your GTM container, so its requests go to `/tiktok/` on your subdomain (in the **Network** tab).
+    - Check that the **TikTok Pixel Code** in ServerMob matches the Pixel on the page. Events from other Pixel codes are ignored.
+    - Check that your events carry an event ID. See [Which events are sent server-side](/servermob/tiktok-events-api#which-events-are-sent-server-side).
+  </Accordion>
+  <Accordion title="Page views are not sent server-side">
+    This is expected. ServerMob only sends standard events that carry an event ID, so they can be deduplicated. Automatic page views usually have no event ID and are delivered by the browser Pixel only.
+  </Accordion>
+</AccordionGroup>
+
+## Still stuck?
+
+Reach out to your DAMA contact with your company name, your ServerMob subdomain and the message you see.

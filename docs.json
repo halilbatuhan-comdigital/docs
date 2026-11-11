@@ -1,53 +1,113 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "DAMA",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
-  },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
+    "primary": "#212529",
+    "light": "#F8F9FA",
+    "dark": "#212529"
   },
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "/images/logo-light.svg",
+    "dark": "/images/logo-dark.svg"
   },
-  "navbar": {
-    "links": [
+  "favicon": "/images/logo-icon.svg",
+  "navigation": {
+    "tabs": [
       {
-        "label": "Support",
-        "href": "mailto:support@mintlify.com"
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Setup",
+            "pages": [
+              "setup/overview",
+              "setup/web",
+              "setup/ios",
+              "setup/android",
+              "setup/flutter",
+              "setup/send-events",
+              "setup/identify-users",
+              "setup/verify-installation"
+            ]
+          },
+          {
+            "group": "ServerMob",
+            "pages": [
+              "servermob/overview",
+              "servermob/domain-setup",
+              "servermob/gtm-setup",
+              "servermob/meta-capi",
+              "servermob/tiktok-events-api",
+              "servermob/troubleshooting"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/overview",
+              "integrations/bigquery",
+              "integrations/google-ads",
+              "integrations/meta"
+            ]
+          },
+          {
+            "group": "Analytics & reporting",
+            "pages": [
+              "user-guide/dashboard",
+              "user-guide/funnel",
+              "user-guide/retention",
+              "user-guide/rfm",
+              "user-guide/cltv",
+              "user-guide/smart-assistant"
+            ]
+          },
+          {
+            "group": "Audiences",
+            "pages": [
+              "user-guide/audiences"
+            ]
+          },
+          {
+            "group": "Account",
+            "pages": [
+              "user-guide/account",
+              "user-guide/companies",
+              "user-guide/team-and-permissions",
+              "user-guide/company-profile"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/introduction",
+              "api-reference/events"
+            ]
+          },
+          {
+            "group": "Tracking API",
+            "pages": [
+              "api-reference/track-event"
+            ]
+          }
+        ]
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "website": "https://usedama.com"
     }
   },
   "contextual": {
@@ -56,17 +116,9 @@
       "view",
       "chatgpt",
       "claude",
-      "perplexity",
       "mcp",
       "cursor",
       "vscode"
     ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
   }
 }
